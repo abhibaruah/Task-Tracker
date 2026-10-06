@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+
+# Local data: the SQLite file and its write-ahead-log sidecars. These hold your
+# tasks, not your code -- keep them out of the repo and use export.py when you
+# want a readable/diffable copy.
+tasks.db
+tasks.db-wal
+tasks.db-shm
+
+# Exports and backups
+backups/
+*.sql
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

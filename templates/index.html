@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Tasks{% endblock %}
+
+{% block content %}
+{# Quick add: one line, no day to create first. The date defaults to today and
+   the day is created automatically, because it is only the task's "date added". #}
+<section class="panel add-panel">
+  <form method="post" action="{{ url_for('add_item', **list_params) }}" class="add-form">
+    <label class="grow">Task
+      <input type="text" name="title" maxlength="200" required autofocus
+             placeholder="What needs doing?">
+    </label>
+    <label>Priority
+      <select name="priority">
+        {% for priority in priorities %}
+          <option value="{{ priority }}"{% if priority == 'Medium' %} selected{% endif %}>{{ priority }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Category
+      <select name="category_id">
+        <option value="">None</option>
+        {% for category in categories %}
+          <option value="{{ category.id }}">{{ category.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Date added
+      <input type="date" name="day_date" value="{{ today }}">
+    </label>
+    <button type="submit">Add task</button>
+  </form>
+</section>
+
+{# Home layout: a two-column grid below the add bar -- the table with the
+   Categories tab beside it (left column, sticky) on wide screens; stacked
+   again on narrow ones. Pure CSS, no JavaScript. #}
+<div class="home-grid">
+
+{# The expandable table. <details> folds the whole thing away; each row expands
+   to reveal its notes and edit form. Click a column header to sort by it. #}
+<details class="panel table-panel" open>
+  <summary>
+    <span class="summary-title">Tasks</span>
+    <span class="summary-meta">
+      {{ banner_counts.open }} open &middot;
+      {% if filter_labels %}showing {{ items|length }} of {{ total }}{% else %}{{ items|length }} total{% endif %} &middot;
+      sorted by {{ columns|selectattr('active')|map(attribute='label')|first|lower }}
+      {{ 'descending' if direction == 'desc' else 'ascending' }}
+      {% if filter_labels %}
+        &middot; filtered by <strong>{{ filter_labels|join(' + ') }}</strong>
+        <a class="clear-filters" href="{{ clear_url }}" title="Show every task again">Clear filters</a>
+      {% endif %}
+    </span>
+  </summary>
+
+  {# The header cells carry the sort links *and* the filter dropdowns: each
+     dropdown is a <details> with a plain GET form of tick boxes, so choosing
+     statuses and/or categories simply reloads the page with
+     ?status= / ?category= repeated once per tick -- the whole filtering
+     mechanism, no JavaScript, no client-side state. The table still renders
+     when a filter matches nothing, so the dropdowns (and the Clear filters
+     link) are always reachable. #}
+  {% if total %}
+    {# Bulk delete with zero JavaScript: this POST form owns the tick boxes
+       down the left of each row through the HTML5 form="..." attribute --
+       the boxes cannot live inside the form itself, because every row
+       already holds forms of its own. Sort and filters travel in the
+       action's query string (like every other form here), so after the
+       delete you come back to the exact view you started from. #}
+    {% if items %}
+    <div class="bulk-bar">
+      <form method="post" action="{{ url_for('delete_items', **list_params) }}"
+            id="bulk-delete" class="bulk-form">
+        <button type="submit" class="danger"
+                title="Remove every ticked row, right now">Delete selected</button>
+        <span class="bulk-hint">Tick boxes down the left of the rows you want to remove.</span>
+      </form>
+    </div>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="tasks">
+        <thead>
+          <tr>
+            <th scope="col" class="col-pick" aria-label="Select"></th>
+            {% for column in columns %}
+              <th scope="col" class="col-{{ column.key }}" aria-sort="{{ column.aria }}">
+                <a href="{{ column.href }}"
+                   title="Sort by {{ column.label|lower }} in {{ column.hint }}">
+                  {{ column.label }}<span class="arrow">{{ column.arrow }}</span>
+                </a>
+                {% set menu = filter_menus.get(column.key) %}
+                {% if menu %}{% include "_filter_menu.html" %}{% endif %}
+              </th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items %}
+            {% include "_task_row.html" %}
+          {% endfor %}
+          {% if not items %}
+            <tr class="empty-row">
+              <td colspan="5" class="empty-cell">
+                No tasks match these filters.
+                <a class="clear-filters" href="{{ clear_url }}" title="Show every task again">Clear filters</a>
+              </td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="empty">No tasks yet. Type one in the box above and press Add task.</p>
+  {% endif %}
+</details>
+
+<details class="panel side-panel">
+  <summary><span class="summary-title">Categories</span></summary>
+  <ul class="cat-list">
+    {% for category in categories %}
+      <li>
+        <span class="dot" style="--cat: {{ category.color }}"></span>
+        <span>{{ category.name }}</span>
+        <span class="cat-usage">{{ category.usage }} task(s)</span>
+        <a class="link-danger cat-delete"
+           href="{{ url_for('confirm_delete_category', category_id=category.id, **list_params) }}"
+           title="Delete the {{ category.name }} category">delete</a>
+      </li>
+    {% endfor %}
+    {% if not categories %}<li class="muted">No categories yet.</li>{% endif %}
+  </ul>
+  <form method="post" action="{{ url_for('create_category', **list_params) }}" class="add-form">
+    <label class="grow">New category <input type="text" name="name" maxlength="40" required></label>
+    <label>Colour <input type="color" name="color" value="#2563eb"></label>
+    <button type="submit">Add category</button>
+  </form>
+</details>
+</div>
+{% endblock %}

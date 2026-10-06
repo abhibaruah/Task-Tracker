@@ -1,0 +1,48 @@
+{# Base layout: the sticky status banner (feature 4) is defined here once, so
+   every page shows the same live To-Do / In-Progress summary. #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Task Tracker{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="banner">
+    <div class="banner-top">
+      <h1><a href="{{ url_for('index') }}">Task Tracker</a></h1>
+      <p class="chips">
+        <span class="chip status-todo">{{ banner_counts.todo }} To Do</span>
+        <span class="chip status-in_progress">{{ banner_counts.in_progress }} In Progress</span>
+        <span class="chip status-done">{{ banner_counts.done }} Done</span>
+      </p>
+    </div>
+
+    {% if banner_counts.open == 0 %}
+      <p class="banner-empty">Nothing to do and nothing in progress.</p>
+    {% endif %}
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <ul class="flashes">
+        {% for category, message in messages %}
+          <li class="flash flash-{{ category }}">{{ message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endwith %}
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="foot">
+    <p>
+      {{ banner_counts.open }} open item(s) &middot; SQLite database:
+      <code>{{ db_path }}</code>
+    </p>
+  </footer>
+</body>
+</html>

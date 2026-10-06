@@ -1,0 +1,385 @@
+/* Task-Tracker stylesheet.
+   The whole UI is a one-line add bar, a table and a Categories tab beside it.
+   There is no JavaScript in this project, so status colours, sorting and the
+   expand/collapse behaviour are all plain CSS and server-rendered links. */
+
+:root {
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --ink: #1f2937;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #2563eb;
+  --danger: #b91c1c;
+
+  /* Feature 3: one colour per status. Every status is also written out in
+     words next to it, so the state is never communicated by colour alone. */
+  --todo-bg: #eef2f7;
+  --todo-line: #64748b;
+  --todo-ink: #334155;
+  --progress-bg: #fef3c7;
+  --progress-line: #f59e0b;
+  --progress-ink: #92400e;
+  --done-bg: #dcfce7;
+  --done-line: #16a34a;
+  --done-ink: #166534;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+a { color: var(--accent); }
+code { background: #eceff3; padding: 0 .25rem; border-radius: 3px; font-size: .85em; }
+.muted { color: var(--muted); }
+
+main { max-width: 1080px; margin: 0 auto; padding: 1rem 1rem 2rem; }
+
+/* ---------- Feature 4: the sticky banner ---------- */
+.banner {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #111827;
+  color: #f9fafb;
+  padding: .6rem 1rem .7rem;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, .25);
+}
+.banner-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem; max-width: 1080px; margin: 0 auto; }
+.banner h1 { font-size: 1.15rem; margin: 0; }
+.banner h1 a { color: #ffffff; text-decoration: none; }
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0; }
+.chip { display: inline-block; padding: .1rem .55rem; border-radius: 999px; font-size: .78rem; font-weight: 600; border: 1px solid transparent; white-space: nowrap; }
+
+.banner-empty { max-width: 1080px; margin: .5rem auto 0; color: #9ca3af; font-size: .85rem; }
+
+/* Banner chips keep their status colours so the counts read at a glance. */
+.chip.status-todo { background: var(--todo-bg); color: var(--todo-ink); }
+.chip.status-in_progress { background: var(--progress-bg); color: var(--progress-ink); }
+.chip.status-done { background: var(--done-bg); color: var(--done-ink); }
+
+/* ---------- Flashed messages ---------- */
+.flashes { list-style: none; max-width: 1080px; margin: .8rem auto 0; padding: 0 1rem; display: grid; gap: .4rem; }
+.flash { padding: .45rem .7rem; border-radius: 5px; font-size: .88rem; border-left: 4px solid; }
+.flash-ok { background: #ecfdf5; border-color: #10b981; color: #065f46; }
+.flash-error { background: #fef2f2; border-color: #ef4444; color: #991b1b; }
+/* ---------- Panels and the add form ---------- */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: .8rem 1rem;
+  margin-bottom: .9rem;
+}
+.panel > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .8rem; }
+.panel > summary::marker { color: var(--muted); }
+.summary-title { font-weight: 600; }
+.summary-meta { color: var(--muted); font-size: .8rem; }
+.danger-panel { border-color: #fecaca; }
+
+.add-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .5rem; }
+.add-form label { display: flex; flex-direction: column; font-size: .76rem; color: var(--muted); gap: .15rem; }
+.add-form .grow { flex: 1 1 260px; }
+.add-form .full { flex: 1 1 100%; }
+.add-form input, .add-form select, .add-form textarea {
+  font: inherit;
+  font-size: .88rem;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  padding: .3rem .45rem;
+}
+.add-form textarea { resize: vertical; }
+
+/* ---------- Home layout: the Categories tab beside the table ---------- */
+/* Below the add bar, a two-column grid puts the Categories panel (left) next
+   to the table (right). Explicit placement keeps the table first in the
+   source order; under 900px these rules drop out and the two panels stack
+   exactly as before. */
+.home-grid { display: grid; gap: .9rem; align-items: start; }
+.home-grid > .panel { margin-bottom: 0; }   /* the grid gap is the spacing */
+@media (min-width: 900px) {
+  .home-grid { grid-template-columns: 270px minmax(0, 1fr); }
+  .home-grid > .side-panel {
+    grid-column: 1;
+    grid-row: 1;
+    position: sticky;   /* the tab stays in reach while a long table scrolls */
+    top: 3.75rem;       /* just under the sticky banner */
+  }
+  .home-grid > .table-panel { grid-column: 2; grid-row: 1; }
+}
+/* In the narrow sidebar each category gets its own line. */
+.side-panel .cat-list { flex-direction: column; gap: .5rem; }
+.side-panel .cat-list li { justify-content: space-between; }
+
+/* ---------- The task table ---------- */
+/* Bulk-delete toolbar: sits directly above the table and *outside* the scroll
+   container, so it stays put when a wide table scrolls sideways. Its tick
+   boxes live in the rows below and join this one form through the HTML5
+   form attribute -- no JavaScript, no nested forms. */
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .3rem; }
+.bulk-form { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin: 0; }
+.bulk-hint { font-size: .74rem; color: var(--muted); }
+/* overflow-x makes this a scroll container on *both* axes (computed
+   overflow-y: auto), which would otherwise clip an open filter dropdown at
+   the table's bottom edge and force you to scroll to see the last options.
+   The minimum height gives even a one-row table enough room: thead (~2rem) +
+   a fully-open menu (fieldset capped at 15rem, plus hint and actions) stays
+   well inside 30rem, so every option is visible without scrolling. */
+.table-wrap { overflow-x: auto; margin-top: .6rem; min-height: 30rem; }
+table.tasks { width: 100%; border-collapse: collapse; font-size: .9rem; }
+
+/* Clickable column headers = the sort controls. The rules target only the
+   direct <a> children, because the filter dropdowns below them hold links
+   and form fields of their own. */
+table.tasks thead th {
+  text-align: left;
+  white-space: nowrap;
+  padding: .35rem .55rem;
+  border-bottom: 2px solid var(--line);
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  vertical-align: bottom;
+}
+table.tasks thead th > a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+}
+table.tasks thead th > a:hover { color: var(--accent); }
+table.tasks thead th[aria-sort="ascending"] > a,
+table.tasks thead th[aria-sort="descending"] > a { color: var(--ink); font-weight: 700; border-bottom-style: solid; }
+table.tasks thead .arrow { margin-left: .25rem; font-size: .7rem; }
+
+/* Column filters: a <details> dropdown under the Status and Category
+   headers, holding a plain GET form of tick boxes ("ticked = show me these").
+   Pure HTML -- the browser submits the form and the server re-renders the
+   table, so this works with zero JavaScript. A filtered column flags itself
+   with a filled pill and a count. */
+.filter-menu {
+  position: relative;
+  display: inline-block;
+  margin-top: .3rem;
+  white-space: normal;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: 0 .5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 500;
+  line-height: 1.7;
+  cursor: pointer;
+  list-style: none;
+}
+.filter-toggle::-webkit-details-marker { display: none; }  /* Safari/Chrome */
+.filter-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.filter-menu.is-on .filter-toggle {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+.filter-menu.is-on .filter-toggle:hover { color: #fff; }
+.filter-menu .caret { font-size: .6rem; transition: transform .15s; }
+.filter-menu[open] .caret { transform: rotate(180deg); }
+
+.filter-form {
+  position: absolute;
+  top: calc(100% + .35rem);
+  left: 0;
+  z-index: 40;
+  min-width: 13rem;
+  max-width: 16rem;
+  padding: .6rem .65rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, .18);
+  white-space: normal;
+}
+.filter-form fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+.filter-form legend {
+  padding: 0;
+  margin-bottom: .3rem;
+  font-size: .7rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--muted);
+}
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .2rem 0;
+  font-size: .84rem;
+  color: var(--ink);
+  cursor: pointer;
+}
+.filter-option input { margin: 0; accent-color: var(--accent); }
+.filter-hint { margin: .4rem 0 0; font-size: .7rem; color: var(--muted); }
+.filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .35rem .45rem;
+  margin-top: .55rem;
+  padding-top: .5rem;
+  border-top: 1px solid var(--line);
+}
+.filter-actions button { font-size: .78rem; padding: .25rem .75rem; }
+/* "Deselect All": a quieter sibling to the blue Apply so both fit the narrow
+   menu. One click clears every box in this dropdown (submitted as
+   ?deselect=<column> and re-rendered unticked), ready to tick just one. */
+.btn-ghost {
+  background: #fff;
+  color: var(--todo-ink);
+  border-color: #cbd5e1;
+}
+.btn-ghost:hover { background: #f1f5f9; }
+.show-all {
+  margin-left: auto;        /* buttons grouped left, Show all stays right */
+  font-size: .74rem;
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.show-all:hover { text-decoration: underline; }
+
+/* "Clear filters": shown in the table summary and in the empty-filter row. */
+.clear-filters {
+  display: inline-block;
+  margin-left: .3rem;
+  padding: .05rem .55rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: .72rem;
+  text-decoration: none;
+}
+.clear-filters:hover { background: var(--accent); color: #fff; }
+.empty-cell { padding: 1rem .55rem; color: var(--muted); text-align: center; }
+
+table.tasks tbody td { padding: .4rem .55rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+
+/* Feature 3: row colour by status (the left edge is on the first cell). */
+.task-row.status-todo td { background: var(--todo-bg); color: var(--todo-ink); }
+.task-row.status-in_progress td { background: var(--progress-bg); color: var(--progress-ink); }
+.task-row.status-done td { background: var(--done-bg); color: var(--done-ink); }
+.task-row.status-todo > td:first-child { border-left: 4px solid var(--todo-line); }
+.task-row.status-in_progress > td:first-child { border-left: 4px solid var(--progress-line); }
+.task-row.status-done > td:first-child { border-left: 4px solid var(--done-line); }
+.task-row.status-done .task-title { text-decoration: line-through; opacity: .75; }
+
+.task-cell { min-width: 18rem; }
+.status-cell { white-space: nowrap; }
+.category-cell { white-space: nowrap; }
+.date-cell { white-space: nowrap; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The tick-box column at the left of every row. It is the row's first cell,
+   so the status colour bar lands here; the box itself picks up the accent
+   colour, like the tick boxes in the filter dropdowns. */
+th.col-pick, td.check-cell { width: 2.1rem; }
+td.check-cell { text-align: center; padding-right: .25rem; }
+td.check-cell input { margin: .1rem 0 0; accent-color: var(--accent); cursor: pointer; }
+/* ---------- Rows that expand, badges, buttons ---------- */
+.task-details > summary { cursor: pointer; list-style-position: outside; }
+.task-details > summary::marker { color: var(--muted); }
+.task-title { font-weight: 600; overflow-wrap: anywhere; }
+.task-details[open] > summary { margin-bottom: .5rem; }
+.task-body { border-left: 2px solid #00000014; padding-left: .7rem; }
+.task-notes { margin: 0 0 .5rem; white-space: pre-wrap; font-size: .85rem; }
+.task-meta { margin: .5rem 0 0; font-size: .76rem; color: var(--muted); }
+.link-danger { color: var(--danger); }
+
+.edit-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .4rem; }
+.edit-form label { display: flex; flex-direction: column; font-size: .72rem; color: var(--muted); gap: .12rem; }
+.edit-form .grow { flex: 1 1 200px; }
+.edit-form .full { flex: 1 1 100%; }
+.edit-form input, .edit-form select, .edit-form textarea {
+  font: inherit; font-size: .85rem; color: var(--ink); background: #fff;
+  border: 1px solid #cbd5e1; border-radius: 5px; padding: .28rem .4rem;
+}
+.edit-form textarea { resize: vertical; }
+
+.dot { display: inline-block; width: .55rem; height: .55rem; border-radius: 50%; background: var(--cat, #9ca3af); margin-right: .35rem; }
+.badge { font-size: .7rem; font-weight: 600; padding: .08rem .4rem; border-radius: 999px; background: #ffffffb3; border: 1px solid #00000014; white-space: nowrap; margin-left: .3rem; }
+.priority-high { background: #fee2e2; color: #991b1b; }
+.priority-medium { background: #fef9c3; color: #854d0e; }
+.priority-low { background: #e0f2fe; color: #075985; }
+.status-badge { background: #1118270f; }
+.note-badge { background: #ede9fe; color: #5b21b6; }
+
+button {
+  font: inherit; font-size: .85rem; cursor: pointer;
+  border: 1px solid #1d4ed8; background: var(--accent); color: #fff;
+  border-radius: 5px; padding: .3rem .65rem;
+}
+button:hover { background: #1d4ed8; }
+button.danger { background: var(--danger); border-color: var(--danger); }
+button.danger:hover { background: #991b1b; }
+
+/* Status buttons in the table: three tiny buttons, the active one pressed in. */
+.status-form { display: flex; flex-wrap: wrap; gap: .2rem; }
+button.mini { padding: .15rem .45rem; font-size: .72rem; background: #fff; color: var(--todo-ink); border-color: #cbd5e1; }
+button.mini:hover { background: #f1f5f9; }
+button.mini.is-current { background: #111827; color: #fff; border-color: #111827; }
+
+.actions { display: flex; align-items: center; gap: .6rem; margin: .8rem 0 0; }
+.button-link { display: inline-block; padding: .3rem .65rem; border: 1px solid #cbd5e1; border-radius: 5px; text-decoration: none; background: #fff; font-size: .85rem; }
+.confirm-task { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; padding: .5rem .6rem; border-radius: 6px; border-left: 4px solid var(--todo-line); }
+.confirm-task.status-in_progress { background: var(--progress-bg); border-left-color: var(--progress-line); }
+.confirm-task.status-done { background: var(--done-bg); border-left-color: var(--done-line); }
+
+.cat-list { list-style: none; display: flex; flex-wrap: wrap; gap: .8rem; margin: .5rem 0 .7rem; padding: 0; font-size: .85rem; }
+.cat-list li { display: flex; align-items: center; gap: .3rem; }
+.cat-usage { color: var(--muted); font-size: .76rem; }
+.cat-delete { font-size: .76rem; }
+.empty { color: var(--muted); font-size: .88rem; margin: .7rem 0 .2rem; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.foot { max-width: 1080px; margin: 0 auto; padding: 0 1rem 2rem; color: var(--muted); font-size: .76rem; }
+
+/* ---------- Responsive + dark mode ---------- */
+@media (max-width: 620px) {
+  .banner-top { flex-direction: column; align-items: flex-start; }
+  .task-cell { min-width: 12rem; }
+  .date-cell { font-size: .8rem; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --ink: #e2e8f0; --muted: #94a3b8; --line: #334155;
+    --todo-bg: #1e293b; --todo-ink: #cbd5e1;
+    --progress-bg: #422006; --progress-ink: #fde68a;
+    --done-bg: #052e16; --done-ink: #bbf7d0;
+  }
+  .add-form input, .add-form select, .add-form textarea,
+  .edit-form input, .edit-form select, .edit-form textarea { background: #0f172a; color: var(--ink); border-color: #475569; }
+  button.mini { background: #0f172a; color: var(--ink); border-color: #475569; }
+  button.mini:hover { background: #334155; }
+  .button-link { background: #0f172a; color: var(--ink); border-color: #475569; }
+  .badge { background: #00000033; border-color: #ffffff1a; }
+  .note-badge { background: #3b0764; color: #ddd6fe; }
+  code { background: #0f172a; }
+  .task-body { border-left-color: #ffffff1a; }
+}

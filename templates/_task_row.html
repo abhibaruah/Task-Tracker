@@ -1,0 +1,80 @@
+{# One row of the task table. Included from index.html.
+   The row background colour comes from .status-* (feature 3), and the status is
+   also spelled out in the buttons, so colour is never the only signal.
+   Clicking the task title expands the row to show notes and the edit form. #}
+<tr class="task-row status-{{ item.status }}" id="task-{{ item.id }}">
+  <td class="check-cell">
+    {# Belongs to the toolbar form at the top of the table (HTML5 form
+       attribute): this row already contains forms of its own, so the box
+       cannot sit inside a second one. It is also the row's first cell, so
+       the status colour edge lands on it. #}
+    <input type="checkbox" name="id" value="{{ item.id }}" form="bulk-delete"
+           title="Tick to delete {{ item.title }}" aria-label="Select {{ item.title }}">
+  </td>
+  <td class="task-cell">
+    <details class="task-details">
+      <summary>
+        <span class="task-title">{{ item.title }}</span>
+        <span class="badge priority-{{ item.priority|lower }}">{{ item.priority }}</span>
+        {% if item.notes %}<span class="badge note-badge" title="Has notes">notes</span>{% endif %}
+      </summary>
+      <div class="task-body">
+        {% if item.notes %}<p class="task-notes">{{ item.notes }}</p>{% endif %}
+        <form method="post" action="{{ url_for('update_item', item_id=item.id, **list_params) }}" class="edit-form">
+          <label class="grow">Title
+            <input type="text" name="title" value="{{ item.title }}" maxlength="200" required>
+          </label>
+          <label>Priority
+            <select name="priority">
+              {% for priority in priorities %}
+                <option value="{{ priority }}"{% if priority == item.priority %} selected{% endif %}>{{ priority }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Category
+            <select name="category_id">
+              <option value="">None</option>
+              {% for category in categories %}
+                <option value="{{ category.id }}"{% if category.id == item.category_id %} selected{% endif %}>{{ category.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>Date added
+            <input type="date" name="day_date" value="{{ item.day_date }}">
+          </label>
+          <label class="full">Notes
+            <textarea name="notes" rows="2" maxlength="2000"
+                      placeholder="Anything worth remembering">{{ item.notes }}</textarea>
+          </label>
+          <button type="submit">Save</button>
+        </form>
+        <p class="task-meta">
+          Added {{ item.created_at }}{% if item.updated_at != item.created_at %} &middot; updated {{ item.updated_at }}{% endif %}
+          &middot; <a class="link-danger"
+             href="{{ url_for('confirm_delete_item', item_id=item.id, **list_params) }}">Delete</a>
+        </p>
+      </div>
+    </details>
+  </td>
+
+  <td class="status-cell">
+    <form method="post" action="{{ url_for('set_status', item_id=item.id, **list_params) }}" class="status-form">
+      {% for status in statuses %}
+        <button type="submit" name="status" value="{{ status }}"
+                class="mini{% if item.status == status %} is-current{% endif %}"
+                title="Mark as {{ status_labels[status] }}"
+                {% if item.status == status %}aria-current="true"{% endif %}>{{ status_labels[status] }}</button>
+      {% endfor %}
+    </form>
+  </td>
+
+  <td class="category-cell">
+    {% if item.category %}
+      <span class="dot" style="--cat: {{ item.category_color }}"></span>{{ item.category }}
+    {% else %}
+      <span class="muted">&mdash;</span>
+    {% endif %}
+  </td>
+
+  <td class="date-cell">{{ item.day_date }}</td>
+</tr>

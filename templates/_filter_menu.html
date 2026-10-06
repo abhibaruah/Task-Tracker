@@ -1,0 +1,29 @@
+{# One column filter: a <details> dropdown holding a plain GET form of tick
+   boxes ("ticked = show me these"). No JavaScript anywhere: submitting the
+   form simply reloads the page with ?status=/ ?category= repeated once per
+   tick. The hidden inputs carry the sort and the *other* column's filter, so
+   applying this dropdown leaves the rest of the view exactly as it was, and
+   "Show all" clears just this column. "Deselect All" is the no-JavaScript way
+   to untick every box at once: it submits ?deselect=<column> and the server
+   re-renders them cleared, so you can then tick just the one you want. #}
+<details class="filter-menu{% if menu.filtered %} is-on{% endif %}"{% if menu.deselected %} open{% endif %}>
+  <summary class="filter-toggle" title="{{ menu.legend }}">
+    Filter{% if menu.filtered %} ({{ menu.count }}){% endif %} <span class="caret">&#9662;</span>
+  </summary>
+  <form class="filter-form" method="get" action="{{ url_for('index') }}">
+    {% for name, value in menu.hidden %}
+    <input type="hidden" name="{{ name }}" value="{{ value }}">
+    {% endfor %}
+    <fieldset>
+      <legend>{{ menu.legend }}</legend>
+      {% for option in menu.options %}<label class="filter-option"><input type="checkbox" name="{{ menu.name }}" value="{{ option.key }}"{% if option.checked %} checked{% endif %}>{% if option.color %} <span class="dot" style="--cat: {{ option.color }}"></span>{% endif %} {{ option.label }}</label>
+      {% endfor %}
+    </fieldset>
+    <p class="filter-hint">{{ menu.hint }}</p>
+    <div class="filter-actions">
+      <button type="submit">Apply</button>
+      <button type="submit" name="deselect" value="{{ menu.name }}" class="btn-ghost" title="Untick every option here, then tick just the ones you want">Deselect All</button>
+      <a class="show-all" href="{{ menu.show_all }}" title="{{ menu.show_all_title }}">Show all</a>
+    </div>
+  </form>
+</details>

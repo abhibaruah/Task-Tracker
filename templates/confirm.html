@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ heading }}{% endblock %}
+
+{% block content %}
+<section class="panel{% if danger %} danger-panel{% endif %}">
+  <h2>{{ heading }}</h2>
+  <p class="muted">{{ question }}</p>
+
+  {# Read-only: the confirm page must not nest the edit and status forms that
+     _task_row.html contains inside the delete form. #}
+  {% for item in items %}
+    <p class="confirm-task status-{{ item.status }}">
+      <span class="task-title">{{ item.title }}</span>
+      <span class="badge priority-{{ item.priority|lower }}">{{ item.priority }}</span>
+      {% if item.category %}
+        <span class="dot" style="--cat: {{ item.category_color }}"></span>{{ item.category }}
+      {% endif %}
+      <span class="badge status-badge">{{ status_labels[item.status] }}</span>
+      <span class="muted">{{ item.day_date }}</span>
+    </p>
+  {% endfor %}
+
+  <form method="post" action="{{ action }}">
+    <p class="actions">
+      <button type="submit" class="danger">Yes, delete</button>
+      <a class="button-link" href="{{ cancel_url }}">Cancel</a>
+    </p>
+  </form>
+</section>
+{% endblock %}
