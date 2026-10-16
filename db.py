@@ -43,6 +43,15 @@ DEFAULT_CATEGORIES = (
     ("Admin", "#b45309"),
 )
 
+# Notes keep their own categories, deliberately separate from the task ones:
+# a tag that fits a shopping list should not have to mean anything on the
+# task table. Seeded the same way, on first run only.
+DEFAULT_NOTE_CATEGORIES = (
+    ("Ideas", "#7c3aed"),
+    ("Journal", "#0891b2"),
+    ("Reference", "#b45309"),
+)
+
 # Sort helpers: open work floats to the top of a day, finished work sinks.
 STATUS_RANK_SQL = "CASE i.status WHEN 'todo' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END"
 PRIORITY_RANK_SQL = "CASE i.priority WHEN 'High' THEN 0 WHEN 'Medium' THEN 1 ELSE 2 END"
@@ -107,6 +116,30 @@ CREATE TABLE IF NOT EXISTS items (
 CREATE INDEX IF NOT EXISTS idx_days_date    ON days (day_date);
 CREATE INDEX IF NOT EXISTS idx_items_day    ON items (day_id);
 CREATE INDEX IF NOT EXISTS idx_items_status ON items (status);
+
+-- The Notes tab: standalone notes, newest first. Titles are optional (the
+-- body is the note); note categories live in their own table so the Notes
+-- tab never shares tags with the task table.
+CREATE TABLE IF NOT EXISTS note_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE
+               CHECK (length(trim(name)) BETWEEN 1 AND 40),
+    color      TEXT    NOT NULL DEFAULT '#6b7280'
+               CHECK (color GLOB '#[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]'),
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS notes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT    NOT NULL DEFAULT '' CHECK (length(trim(title)) <= 200),
+    body        TEXT    NOT NULL DEFAULT '' CHECK (length(body) <= 5000),
+    category_id INTEGER          REFERENCES note_categories(id) ON DELETE SET NULL,
+    archived    INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_notes_category ON notes (category_id);
 """
 
 
@@ -153,7 +186,7 @@ def init_app(app):
 
 
 def init_db(path=None):
-    """Create the tables if needed, seed categories, return the path used."""
+    """Create the tables if needed, migrate old ones, seed categories."""
     path = path or db_path()
     conn = connect(path)
     try:
@@ -163,10 +196,90 @@ def init_db(path=None):
                 "INSERT INTO categories (name, color) VALUES (?, ?)",
                 DEFAULT_CATEGORIES,
             )
+        # Seed note categories before migrating, so an upgraded database gets
+        # the defaults too and the migration can copy any *extra* names in.
+        if conn.execute("SELECT COUNT(*) FROM note_categories").fetchone()[0] == 0:
+            conn.executemany(
+                "INSERT INTO note_categories (name, color) VALUES (?, ?)",
+                DEFAULT_NOTE_CATEGORIES,
+            )
+        _migrate_notes_to_own_categories(conn)
+        _migrate_notes_archived_column(conn)
         conn.commit()
     finally:
         conn.close()
     return path
+
+
+def _migrate_notes_archived_column(conn):
+    """Add ``notes.archived`` to databases written before archiving existed.
+
+    One ``ALTER TABLE`` is all it takes: existing rows get the default (0 =
+    live), so nothing moves until you archive it yourself. Returns True if it
+    ran.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(notes)")}
+    if "archived" in columns:
+        return False
+    conn.execute(
+        "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+        " CHECK (archived IN (0, 1))"
+    )
+    return True
+
+
+def _migrate_notes_to_own_categories(conn):
+    """Rebuild ``notes`` if it still points at the task ``categories`` table.
+
+    Databases written before note categories existed carry a foreign key into
+    ``categories``; ``CREATE TABLE IF NOT EXISTS`` cannot change that, so the
+    table is rebuilt here. Each note keeps its category by *name*: the name is
+    found (or created) in ``note_categories``, so the coloured dot on the
+    Notes tab looks exactly as it did before the upgrade, while the task
+    categories themselves are left untouched. Returns True if it ran.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes'"
+    ).fetchone()
+    if row is None or not row["sql"] or "REFERENCES note_categories" in row["sql"]:
+        return False
+
+    old_notes = conn.execute(
+        """
+        SELECT n.id, n.title, n.body, n.category_id, n.created_at, n.updated_at,
+               c.name AS category_name, c.color AS category_color
+        FROM notes n
+        LEFT JOIN categories c ON c.id = n.category_id
+        ORDER BY n.id
+        """
+    ).fetchall()
+
+    # Drop and recreate: this also moves idx_notes_category over with it.
+    conn.execute("DROP TABLE notes")
+    conn.executescript(SCHEMA)
+
+    for note in old_notes:
+        category_id = None
+        if note["category_name"]:
+            existing = conn.execute(
+                "SELECT id FROM note_categories WHERE name = ?",
+                (note["category_name"],),
+            ).fetchone()
+            if existing is not None:
+                category_id = existing["id"]
+            else:
+                cursor = conn.execute(
+                    "INSERT INTO note_categories (name, color) VALUES (?, ?)",
+                    (note["category_name"], note["category_color"] or DEFAULT_COLOR),
+                )
+                category_id = cursor.lastrowid
+        conn.execute(
+            "INSERT INTO notes (id, title, body, category_id, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (note["id"], note["title"], note["body"], category_id,
+             note["created_at"], note["updated_at"]),
+        )
+    return True
 # ---------------------------------------------------------------------------
 # Validation. Anything that fails here raises ValidationError, which app.py
 # turns into a flashed message rather than a 500.
@@ -214,10 +327,10 @@ def check_color(value):
     raise ValidationError("Colour must be a hex value like #1a2b3c.")
 
 
-def check_title(value, limit=200):
+def check_title(value, limit=200, who="An item"):
     text = (value or "").strip()
     if not text:
-        raise ValidationError("An item needs a title.")
+        raise ValidationError("%s needs a title." % who)
     if len(text) > limit:
         raise ValidationError("That title is too long (max %d characters)." % limit)
     return text
@@ -234,6 +347,22 @@ def _category_id(value):
     row = get_db().execute("SELECT id FROM categories WHERE id = ?", (category_id,)).fetchone()
     if row is None:
         raise ValidationError("That category no longer exists.")
+    return category_id
+
+
+def _note_category_id(value):
+    """Same as :func:`_category_id`, but for the Notes tab's own categories."""
+    if value in (None, "", "None"):
+        return None
+    try:
+        category_id = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError("Unknown note category.")
+    row = get_db().execute(
+        "SELECT id FROM note_categories WHERE id = ?", (category_id,)
+    ).fetchone()
+    if row is None:
+        raise ValidationError("That note category no longer exists.")
     return category_id
 
 
@@ -457,6 +586,93 @@ def banner_counts():
         counts[row["status"]] = row["n"]
     counts["open"] = counts["todo"] + counts["in_progress"]
     return counts
+
+
+def list_notes(archived=False):
+    """Every note in the tab, newest first, with its category joined in.
+
+    Newest-first matches how notes are used: whatever you just wrote sits at
+    the top of the tab. ``created_at DESC, id DESC`` keeps equal timestamps
+    (SQLite's clock has one-second resolution) in a stable, sensible order.
+    Archived notes live in their own dropdown, so pass ``archived=True`` to
+    list those instead of the live ones.
+    """
+    rows = get_db().execute(
+        """
+        SELECT n.id, n.title, n.body, n.category_id, n.archived,
+               n.created_at, n.updated_at,
+               c.name AS category, c.color AS category_color
+        FROM notes n
+        LEFT JOIN note_categories c ON c.id = n.category_id
+        WHERE n.archived = ?
+        ORDER BY n.created_at DESC, n.id DESC
+        """,
+        (1 if archived else 0,),
+    ).fetchall()
+    return [dict(row, label=note_label(row["title"], row["body"])) for row in rows]
+
+
+def get_note(note_id):
+    """One note with its category (None if it is gone)."""
+    row = get_db().execute(
+        """
+        SELECT n.id, n.title, n.body, n.category_id, n.archived,
+               n.created_at, n.updated_at,
+               c.name AS category, c.color AS category_color
+        FROM notes n
+        LEFT JOIN note_categories c ON c.id = n.category_id
+        WHERE n.id = ?
+        """,
+        (note_id,),
+    ).fetchone()
+    return dict(row, label=note_label(row["title"], row["body"])) if row else None
+
+
+def note_label(title, body):
+    """A short display name for a note: its title, else the first body line.
+
+    Titles are optional on the Notes tab, so every place that names a note
+    (the flash message, the card heading, the delete confirmation) goes
+    through this helper and never shows a bare "Untitled note".
+    """
+    title = (title or "").strip()
+    if title:
+        return title
+    for line in (body or "").splitlines():
+        line = line.strip()
+        if line:
+            return line if len(line) <= 60 else line[:57] + "..."
+    return "Untitled note"
+
+
+def list_note_categories():
+    """Note categories with the number of notes using each one, alphabetically."""
+    rows = get_db().execute(
+        """
+        SELECT c.id, c.name, c.color, COUNT(n.id) AS usage
+        FROM note_categories c
+        LEFT JOIN notes n ON n.category_id = c.id
+        GROUP BY c.id
+        ORDER BY c.name
+        """
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_note_category(category_id):
+    """One note category plus how many notes reference it (None if it is gone)."""
+    row = get_db().execute(
+        """
+        SELECT c.id, c.name, c.color, COUNT(n.id) AS usage
+        FROM note_categories c
+        LEFT JOIN notes n ON n.category_id = c.id
+        WHERE c.id = ?
+        GROUP BY c.id
+        """,
+        (category_id,),
+    ).fetchone()
+    return dict(row) if row else None
+
 # ---------------------------------------------------------------------------
 # Writes
 # ---------------------------------------------------------------------------
@@ -641,6 +857,83 @@ def delete_category(category_id):
     """
     db = get_db()
     cursor = db.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def create_note(title, body="", category_id=None):
+    """Add a note from the Notes tab: body required, title optional."""
+    title = (title or "").strip()
+    if len(title) > 200:
+        raise ValidationError("That title is too long (max 200 characters).")
+    body = (body or "").strip()
+    if not body:
+        # The body *is* the note; a title is only a friendly heading.
+        raise ValidationError("A note needs a body.")
+    if len(body) > 5000:
+        raise ValidationError("That note is too long (max 5000 characters).")
+    category_id = _note_category_id(category_id)
+
+    db = get_db()
+    cursor = db.execute(
+        "INSERT INTO notes (title, body, category_id) VALUES (?, ?, ?)",
+        (title, body, category_id),
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def delete_note(note_id):
+    db = get_db()
+    cursor = db.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def set_note_archived(note_id, archived):
+    """Move a note between the live list and the Archive dropdown.
+
+    Archiving is a flag, not a move: the note keeps its body, category and
+    dates (``updated_at`` deliberately stays put -- nothing was edited), and
+    delete still works from either side. Returns False if the note is already
+    in that state (or is gone).
+    """
+    db = get_db()
+    cursor = db.execute(
+        "UPDATE notes SET archived = ? WHERE id = ? AND archived <> ?",
+        (1 if archived else 0, note_id, 1 if archived else 0),
+    )
+    db.commit()
+    return cursor.rowcount > 0
+
+
+def create_note_category(name, color=DEFAULT_COLOR):
+    """Create a category for the Notes tab (its own table, not the task one)."""
+    name = (name or "").strip()
+    if not name:
+        raise ValidationError("A category needs a name.")
+    if len(name) > 40:
+        raise ValidationError("That category name is too long (max 40 characters).")
+    color = check_color(color)
+
+    db = get_db()
+    existing = db.execute(
+        "SELECT 1 FROM note_categories WHERE lower(name) = lower(?)", (name,)
+    ).fetchone()
+    if existing is not None:
+        raise ValidationError("%s already exists." % name)
+
+    cursor = db.execute(
+        "INSERT INTO note_categories (name, color) VALUES (?, ?)", (name, color)
+    )
+    db.commit()
+    return cursor.lastrowid
+
+
+def delete_note_category(category_id):
+    """Delete a note category. Its notes are kept and become uncategorised."""
+    db = get_db()
+    cursor = db.execute("DELETE FROM note_categories WHERE id = ?", (category_id,))
     db.commit()
     return cursor.rowcount > 0
 

@@ -329,6 +329,74 @@ td.check-cell input { margin: .1rem 0 0; accent-color: var(--accent); cursor: po
 .status-badge { background: #1118270f; }
 .note-badge { background: #ede9fe; color: #5b21b6; }
 
+/* ---------- Notes tab ------------------------------------------------- */
+.note-list { list-style: none; margin: .5rem 0 0; padding: 0; }
+.note-list li { margin-bottom: .6rem; }
+/* The card inside is the visible unit, matching the task-row cards. */
+.note-list li:last-child { margin-bottom: 0; }
+
+/* ---------- Common card styles shared with the Tasks tab rows ---------- */
+.card {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--todo-line);
+  border-radius: 6px;
+  padding: .55rem .7rem;
+  background: var(--panel);
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.card > summary { cursor: pointer; list-style-position: outside; display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem .6rem; }
+.card > summary::marker { color: var(--muted); }
+.card:hover { border-color: #93c5fd; box-shadow: 0 1px 4px rgba(0, 0, 0, .06); }
+.card[open] > summary { margin-bottom: .5rem; }
+.card-body { border-left: 2px solid #00000014; padding-left: .7rem; }
+.card-title { font-weight: 600; overflow-wrap: anywhere; }
+.card-note { margin: 0 0 .5rem; white-space: pre-wrap; font-size: .85rem; }
+.card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; font-size: .76rem; color: var(--muted); margin-top: .35rem; }
+.card-meta time { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* An archive/restore button lives inside a card's meta row: the form must not
+   disturb the flex layout around it. */
+.inline-form { display: inline-block; margin: 0; line-height: 0; }
+/* Archived notes sit in their own dropdown; they read as "put away" without
+   becoming unreadable, and the badge spells the state out in words. */
+.card-archived { opacity: .75; border-left-color: var(--muted); }
+.card-archived:hover { opacity: 1; }
+.archived-badge { background: #1118270f; color: var(--muted); margin-left: 0; }
+.archive-panel .note-list { margin-top: .4rem; }
+.card-category { font-size: .78rem; font-weight: 600; color: var(--cat, var(--muted)); }
+
+/* ---------- Forms in cards (create + edit mirrors) ---------- */
+.card-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .4rem; }
+.card-form label { display: flex; flex-direction: column; font-size: .72rem; color: var(--muted); gap: .12rem; }
+.card-form .grow { flex: 1 1 200px; }
+.card-form .full { flex: 1 1 100%; }
+.card-form input,
+.card-form select,
+.card-form textarea {
+  font: inherit; font-size: .85rem; color: var(--ink); background: #fff;
+  border: 1px solid #cbd5e1; border-radius: 5px; padding: .28rem .4rem;
+}
+.card-form textarea { resize: vertical; }
+
+/* ---------- Back to Tasks ---------- */
+.back-to-tasks { display: inline-flex; align-items: center; gap: .35rem; margin: .5rem 0 0; padding: .4rem .6rem; border: 1px solid var(--line); border-radius: 6px; text-decoration: none; color: var(--ink); font-size: .85rem; background: var(--panel); }
+.back-to-tasks:hover { border-color: var(--accent); color: var(--accent); background: #eff6ff; }
+
+.add-form label { display: flex; flex-direction: column; font-size: .76rem; color: var(--muted); gap: .15rem; }
+.add-form .grow { flex: 1 1 260px; }
+.add-form .full { flex: 1 1 100%; }
+.add-form input[type="text"],
+.add-form textarea,
+.add-form select {
+  width: 100%; padding: .4rem .5rem; font: inherit; color: var(--ink);
+  background: #fff; border: 1px solid var(--line); border-radius: 5px;
+  box-sizing: border-box;
+}
+.add-form textarea { min-height: 8rem; resize: vertical; }
+.add-form input:focus, .add-form textarea:focus, .add-form select:focus {
+  outline: 2px solid var(--accent); outline-offset: -1px;
+}
+
+
 button {
   font: inherit; font-size: .85rem; cursor: pointer;
   border: 1px solid #1d4ed8; background: var(--accent); color: #fff;
@@ -380,6 +448,7 @@ button.mini.is-current { background: #111827; color: #fff; border-color: #111827
   .button-link { background: #0f172a; color: var(--ink); border-color: #475569; }
   .badge { background: #00000033; border-color: #ffffff1a; }
   .note-badge { background: #3b0764; color: #ddd6fe; }
+  .dot { background: var(--cat, #9ca3af); }
   code { background: #0f172a; }
   .task-body { border-left-color: #ffffff1a; }
 }

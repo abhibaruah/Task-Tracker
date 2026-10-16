@@ -52,6 +52,20 @@ def build_document():
             dict(row)
             for row in conn.execute("SELECT id, name, color FROM categories ORDER BY name")
         ]
+        note_categories = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT id, name, color FROM note_categories ORDER BY name"
+            )
+        ]
+        notes = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT id, title, body, category_id, archived,"
+                " created_at, updated_at "
+                "FROM notes ORDER BY archived, created_at DESC, id DESC"
+            )
+        ]
         days = []
         for row in conn.execute(
             "SELECT id, day_date, label, created_at FROM days ORDER BY day_date"
@@ -82,6 +96,8 @@ def build_document():
             "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "database": os.path.abspath(db.db_path()),
             "categories": categories,
+            "note_categories": note_categories,
+            "notes": notes,
             "days": days,
         }
     finally:

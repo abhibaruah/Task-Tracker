@@ -12,6 +12,10 @@
   <header class="banner">
     <div class="banner-top">
       <h1><a href="{{ url_for('index') }}">Task Tracker</a></h1>
+      <nav class="tabs" aria-label="Sections">
+        <a href="{{ url_for('index') }}"{% if active_tab == 'tasks' %} aria-current="page"{% endif %}>Tasks</a>
+        <a href="{{ url_for('list_notes') }}"{% if active_tab == 'notes' %} aria-current="page"{% endif %}>Notes</a>
+      </nav>
       <p class="chips">
         <span class="chip status-todo">{{ banner_counts.todo }} To Do</span>
         <span class="chip status-in_progress">{{ banner_counts.in_progress }} In Progress</span>

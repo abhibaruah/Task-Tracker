@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Notes{% endblock %}
+
+{% block content %}
+        <section class="panel add-panel">
+          <h2>Create a note</h2>
+          <p class="muted">A note needs a body; the title is just an optional heading.</p>
+
+          <form method="post" action="{{ url_for('create_note') }}" class="add-form">
+            <label class="grow">Title <span class="muted">(optional)</span>
+              <input type="text" name="title" maxlength="200" autofocus
+                     placeholder="A short heading, if you want one">
+            </label>
+            <label class="full">Body
+              <textarea name="body" rows="8" maxlength="5000" required
+                        placeholder="What should this note say? (required)"></textarea>
+            </label>
+            <label>Category
+              <select name="category_id">
+                <option value="">None</option>
+                {% for category in note_categories %}
+                  <option value="{{ category.id }}">{{ category.name }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <button type="submit">Add note</button>
+          </form>
+        </section>
+
+        {# Collapsed by default: the create-form's Category dropdown already
+           lists the names, so this panel is only needed to add or remove one. #}
+        <details class="panel side-panel">
+          <summary><span class="summary-title">Note categories</span>
+            <span class="summary-meta">{{ note_categories|length }} total</span>
+          </summary>
+          <ul class="cat-list">
+            {% for category in note_categories %}
+              <li>
+                <span class="dot" style="--cat: {{ category.color }}"></span>
+                <span>{{ category.name }}</span>
+                <span class="cat-usage">{{ category.usage }} note(s)</span>
+                <a class="link-danger cat-delete"
+                   href="{{ url_for('confirm_delete_note_category', category_id=category.id) }}"
+                   title="Delete the {{ category.name }} category">delete</a>
+              </li>
+            {% endfor %}
+            {% if not note_categories %}<li class="muted">No categories yet.</li>{% endif %}
+          </ul>
+          <form method="post" action="{{ url_for('create_note_category') }}" class="add-form">
+            <label class="grow">New category <input type="text" name="name" maxlength="40" required></label>
+            <label>Colour <input type="color" name="color" value="#2563eb"></label>
+            <button type="submit">Add category</button>
+          </form>
+        </details>
+
+        <section class="panel">
+          <h2>Your notes</h2>
+          <p class="summary-meta">
+            {% if notes %}{{ notes|length }} note{{ 's' if notes|length != 1 }}{% else %}No notes yet{% endif %}
+          </p>
+
+          {% if notes %}
+            <ul class="note-list">
+              {% for note in notes %}
+                <li>
+                  <details class="card" open>
+                    <summary>
+                      <span class="card-title">{{ note.label }}</span>
+                      {% if note.category %}
+                        <span class="dot" style="--cat: {{ note.category_color }}"></span>
+                        <span class="card-category">{{ note.category }}</span>
+                      {% endif %}
+                    </summary>
+                    <div class="card-body">
+                      <p class="card-note">{{ note.body }}</p>
+                      <div class="card-meta">
+                        <time>{{ note.created_at }}{% if note.updated_at != note.created_at %} &middot; edited {{ note.updated_at }}{% endif %}</time>
+                        {# Archive is a POST like the status buttons on the
+                           Tasks tab: reversible, so no confirmation page. #}
+                        <form method="post" action="{{ url_for('archive_note', note_id=note.id) }}"
+                              class="inline-form">
+                          <button type="submit" class="mini"
+                                  title="Move note {{ note.label }} to the archive">archive</button>
+                        </form>
+                        <a class="link-danger" href="{{ url_for('confirm_delete_note', note_id=note.id) }}"
+                           title="Delete note {{ note.label }}">delete</a>
+                      </div>
+                    </div>
+                  </details>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="empty">Write something in the body above and press <strong>Add note</strong>.</p>
+          {% endif %}
+        </section>
+
+        {# The Archive is a dropdown, not a section: it only needs to be open
+           when you are looking for something, and delete works from inside it. #}
+        <details class="panel archive-panel">
+          <summary>
+            <span class="summary-title">Archived notes</span>
+            <span class="summary-meta">{{ archived|length }} note{{ 's' if archived|length != 1 }}</span>
+          </summary>
+          {% if archived %}
+            <ul class="note-list">
+              {% for note in archived %}
+                <li class="archived-item">
+                  <details class="card card-archived" open>
+                    <summary>
+                      <span class="card-title">{{ note.label }}</span>
+                      {% if note.category %}
+                        <span class="dot" style="--cat: {{ note.category_color }}"></span>
+                        <span class="card-category">{{ note.category }}</span>
+                      {% endif %}
+                      <span class="badge archived-badge">archived</span>
+                    </summary>
+                    <div class="card-body">
+                      <p class="card-note">{{ note.body }}</p>
+                      <div class="card-meta">
+                        <time>{{ note.created_at }}</time>
+                        <form method="post" action="{{ url_for('unarchive_note', note_id=note.id) }}"
+                              class="inline-form">
+                          <button type="submit" class="mini"
+                                  title="Move note {{ note.label }} back to your notes">restore</button>
+                        </form>
+                        <a class="link-danger" href="{{ url_for('confirm_delete_note', note_id=note.id) }}"
+                           title="Delete note {{ note.label }}">delete</a>
+                      </div>
+                    </div>
+                  </details>
+                </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <p class="empty">Nothing archived yet.</p>
+          {% endif %}
+        </details>
+
+        <a class="back-to-tasks" href="{{ url_for('index') }}">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M11.75 3.75 4.25 11.25" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.25 3.75h7.5v7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Back to Tasks
+        </a>
+{% endblock %}
+

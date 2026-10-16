@@ -61,6 +61,10 @@ def create_app():
             "status_labels": db.STATUS_LABELS,
             "today": date.today().isoformat(),
             "db_path": db.db_path(),
+            # Which banner tab is lit up: any endpoint that mentions a note
+            # (including note categories) counts as "notes"; everything else
+            # counts as "tasks".
+            "active_tab": "notes" if "note" in (request.endpoint or "") else "tasks",
             # Sort + active filters, for every link that should come back to
             # this exact view (form actions, confirm pages, delete links).
             "list_params": _list_params(),
@@ -223,10 +227,121 @@ def create_app():
         )
         return _see_other(_list_url())
 
+    # -----------------------------------------------------------------------
+    # The Notes tab
+    # -----------------------------------------------------------------------
+    @app.route("/notes", methods=["GET"])
+    def list_notes():
+        """Standalone notes, newest first, with a create form on top."""
+        return render_template(
+            "notes.html",
+            notes=db.list_notes(),
+            archived=db.list_notes(archived=True),
+            note_categories=db.list_note_categories(),
+        )
+
+    @app.route("/notes", methods=["POST"])
+    def create_note():
+        """Add one note: a required body plus an optional title and category."""
+        title = request.form.get("title", "")
+        body = request.form.get("body", "")
+        db.create_note(
+            title,
+            body,
+            request.form.get("category_id"),
+        )
+        # The title is optional, so name the note the way the list will.
+        flash("Added note %s." % db.note_label(title, body), "ok")
+        return _see_other(url_for("list_notes"))
+
+    @app.route("/notes/<int:note_id>/delete", methods=["GET"])
+    def confirm_delete_note(note_id):
+        note = db.get_note(note_id) or abort(404)
+        return render_template(
+            "confirm.html",
+            heading="Delete note %s?" % note["label"],
+            question="This cannot be undone.",
+            action=url_for("delete_note", note_id=note_id),
+            cancel_url=url_for("list_notes"),
+            items=[],
+            danger=True,
+        )
+
+    @app.route("/notes/<int:note_id>/delete", methods=["POST"])
+    def delete_note(note_id):
+        note = db.get_note(note_id) or abort(404)
+        db.delete_note(note_id)
+        flash("Deleted note %s." % note["label"], "ok")
+        return _see_other(url_for("list_notes"))
+
+    # Archiving is a flag, not a destructive step, so it needs no confirmation
+    # page -- one POST and the note slides into (or out of) the Archive
+    # dropdown. Delete keeps its confirm flow and works from either list.
+    @app.route("/notes/<int:note_id>/archive", methods=["POST"])
+    def archive_note(note_id):
+        note = db.get_note(note_id) or abort(404)
+        db.set_note_archived(note_id, True)
+        flash("Archived note %s." % note["label"], "ok")
+        return _see_other(url_for("list_notes"))
+
+    @app.route("/notes/<int:note_id>/unarchive", methods=["POST"])
+    def unarchive_note(note_id):
+        note = db.get_note(note_id) or abort(404)
+        db.set_note_archived(note_id, False)
+        flash("Restored note %s from the archive." % note["label"], "ok")
+        return _see_other(url_for("list_notes"))
+
+    # Note categories live on the Notes tab and are independent of the task
+    # categories: they have their own table, their own routes, and they never
+    # appear in the Tasks tab's sidebar.
+    @app.route("/notes/categories", methods=["POST"])
+    def create_note_category():
+        db.create_note_category(
+            request.form.get("name", ""),
+            request.form.get("color", db.DEFAULT_COLOR),
+        )
+        flash("Added category %s." % request.form.get("name", "").strip(), "ok")
+        return _see_other(url_for("list_notes"))
+
+    @app.route("/notes/categories/<int:category_id>/delete", methods=["GET"])
+    def confirm_delete_note_category(category_id):
+        category = db.get_note_category(category_id) or abort(404)
+        if category["usage"]:
+            question = (
+                "%d note(s) currently use this category. They are kept, and "
+                "simply become uncategorised." % category["usage"]
+            )
+        else:
+            question = "No notes use this category."
+        return render_template(
+            "confirm.html",
+            heading="Delete category %s?" % category["name"],
+            question=question,
+            action=url_for("delete_note_category", category_id=category_id),
+            cancel_url=url_for("list_notes"),
+            items=[],
+            danger=True,
+        )
+
+    @app.route("/notes/categories/<int:category_id>/delete", methods=["POST"])
+    def delete_note_category(category_id):
+        category = db.get_note_category(category_id) or abort(404)
+        db.delete_note_category(category_id)
+        flash(
+            "Deleted category %s. Its %d note(s) are now uncategorised."
+            % (category["name"], category["usage"]),
+            "ok",
+        )
+        return _see_other(url_for("list_notes"))
+
     @app.errorhandler(db.ValidationError)
     def handle_validation_error(exc):
         """Bad input never reaches SQLite: flash the reason and go back."""
         flash(str(exc), "error")
+        # A bad note (empty title, over-long body, ...) belongs to the Notes
+        # tab, so send it back there; everything else belongs to the table.
+        if request.path.startswith("/notes") and request.method == "POST":
+            return _see_other(url_for("list_notes"))
         return _see_other(_list_url())
 
     return app

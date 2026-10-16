@@ -88,6 +88,14 @@ class TaskTrackerTestCase(unittest.TestCase):
                     return category["id"]
         return None
 
+    def note_category_id(self, name):
+        """The id of a *Notes-tab* category (their own table, not the task one)."""
+        with self.app.app_context():
+            for category in db.list_note_categories():
+                if category["name"] == name:
+                    return category["id"]
+        return None
+
     def assert_order(self, *titles, **params):
         """Assert these titles appear in this order inside the table body."""
         body = self.table(**params)
@@ -928,6 +936,374 @@ class TaskTrackerTestCase(unittest.TestCase):
         self.assertIn("min-height: 30rem", css)       # room for the dropdown
         self.assertIn("grid-column: 1", css)          # categories on the left
         self.assertIn("grid-column: 2", css)          # table on the right
+
+
+
+    # -- notes ---------------------------------------------------------------
+    def _note_id(self, label):
+        """Find a note by title/label, in the live list or the archive."""
+        with self.app.app_context():
+            for note in db.list_notes() + db.list_notes(archived=True):
+                if note["title"] == label or note["label"] == label:
+                    return note["id"]
+        raise AssertionError("no such note: %s" % label)
+
+    def test_notes_tab_lists_notes(self):
+        self.client.post("/notes", data={"title": "First", "body": "One", "category_id": ""},
+                         follow_redirects=True)
+        self.client.post("/notes", data={"title": "Second", "body": "Two", "category_id": ""},
+                         follow_redirects=True)
+        body = self.client.get("/notes").get_data(as_text=True)
+        self.assertIn("Your notes", body)
+        self.assertIn("Second", body)          # newest first
+        self.assertIn("First", body)
+        self.assertIn("One", body)
+        self.assertIn("Two", body)
+
+    def test_create_note_stores_title_body_and_category(self):
+        response = self.client.post("/notes", data={"title": "Shopping", "body": "Milk, eggs",
+                                                       "category_id": self.note_category_id("Journal")},
+                                    follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Added note Shopping.", response.data)
+        with self.app.app_context():
+            notes = db.list_notes()
+            self.assertEqual(len(notes), 1)
+            self.assertEqual(notes[0]["title"], "Shopping")
+            self.assertEqual(notes[0]["body"], "Milk, eggs")
+            self.assertEqual(notes[0]["category"], "Journal")
+
+    def test_create_note_default_category_none(self):
+        self.client.post("/notes", data={"title": "No category", "body": "text", "category_id": ""},
+                         follow_redirects=True)
+        with self.app.app_context():
+            self.assertIsNone(db.list_notes()[0]["category_id"])
+            self.assertIsNone(db.list_notes()[0]["category"])
+
+    def test_title_is_optional(self):
+        # A blank (or whitespace-only) title is fine -- the body is the note.
+        response = self.client.post("/notes", data={"title": "  ", "body": "Buy more coffee"},
+                                    follow_redirects=True)
+        self.assertIn(b"Added note Buy more coffee.", response.data)   # label = first body line
+        with self.app.app_context():
+            note = db.list_notes()[0]
+            self.assertEqual(note["title"], "")
+            self.assertEqual(note["label"], "Buy more coffee")
+
+    def test_blank_body_is_rejected(self):
+        response = self.client.post("/notes", data={"title": "Heading only", "body": "   "},
+                                    follow_redirects=True)
+        self.assertIn(b"A note needs a body.", response.data)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+
+    def test_body_textarea_sits_below_the_title_and_has_room(self):
+        body = self.client.get("/notes").get_data(as_text=True)
+        title_pos = body.index('name="title"')
+        body_pos = body.index('name="body"')
+        self.assertLess(title_pos, body_pos)                # body below the title box
+        textarea = body[body_pos:body.index(">", body_pos)]
+        self.assertIn('rows="8"', textarea)                 # a proper writing area
+        self.assertIn("required", textarea)
+        title_tag = body[title_pos:body.index(">", title_pos)]
+        self.assertNotIn("required", title_tag)             # ...but the title is not
+
+    def test_note_too_long_is_rejected(self):
+        too_long = "x" * 5001
+        response = self.client.post("/notes", data={"title": "Long", "body": too_long},
+                                    follow_redirects=True)
+        self.assertIn(b"That note is too long", response.data)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+
+    def test_invalid_category_is_rejected(self):
+        missing = self.client.post("/notes", data={"title": "Unknown", "body": "x",
+                                                   "category_id": "424242"},
+                                   follow_redirects=True)
+        self.assertIn(b"no longer exists", missing.data)
+        junk = self.client.post("/notes", data={"title": "Junk", "body": "x",
+                                                "category_id": "not-a-number"},
+                                follow_redirects=True)
+        self.assertIn(b"Unknown note category", junk.data)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+
+    def test_task_categories_cannot_be_used_for_notes(self):
+        # The two category tables have independent id sequences. Creating an
+        # extra *task* category gives it an id (5) that the Notes tab's own
+        # table -- seeded with three -- does not have, so the note rejects it.
+        self.client.post("/categories", data={"name": "Zebra", "color": "#123456"})
+        task_cat_id = self.category_id("Zebra")
+        self.assertIsNotNone(task_cat_id)
+        response = self.client.post(
+            "/notes",
+            data={"title": "Nope", "body": "x", "category_id": task_cat_id},
+            follow_redirects=True,
+        )
+        self.assertIn(b"That note category no longer exists.", response.data)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+
+    def test_note_and_task_categories_are_independent(self):
+        # A category created for notes must not show up in the Tasks sidebar...
+        self.client.post("/notes/categories", data={"name": "Brainstorm", "color": "#123456"},
+                         follow_redirects=True)
+        self.assertIsNotNone(self.note_category_id("Brainstorm"))
+        self.assertIsNone(self.category_id("Brainstorm"))
+        # ...and one created for tasks must not show up in the Notes select.
+        self.client.post("/categories", data={"name": "Chores", "color": "#654321"},
+                         follow_redirects=True)
+        self.assertIsNotNone(self.category_id("Chores"))
+        self.assertIsNone(self.note_category_id("Chores"))
+        notes_page = self.client.get("/notes").get_data(as_text=True)
+        self.assertIn("Brainstorm", notes_page)
+        self.assertNotIn("Chores", notes_page)         # task-only categories stay out
+        self.assertIn("Journal", notes_page)           # seeded note categories are in
+
+    def test_note_delete_asks_then_removes_it(self):
+        self.client.post("/notes", data={"title": "Trash this", "body": "x"}, follow_redirects=True)
+        note_id = self._note_id("Trash this")
+        confirm = self.client.get("/notes/%d/delete" % note_id)
+        self.assertEqual(confirm.status_code, 200)
+        self.assertIn(b"Delete note Trash this?", confirm.data)
+        # card title + archive-button title + delete-link title
+        self.assertEqual(self.client.get("/notes").get_data(as_text=True).count("Trash this"), 3)
+
+        self.client.post("/notes/%d/delete" % note_id, follow_redirects=True)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+
+    def test_delete_note_redirects_back_to_notes(self):
+        self.client.post("/notes", data={"title": "One", "body": "text"}, follow_redirects=True)
+        note_id = self._note_id("One")
+        response = self.client.post("/notes/%d/delete" % note_id, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Deleted note One.", response.data)
+
+    def test_unknown_note_returns_404(self):
+        self.assertEqual(self.client.get("/notes/999/delete").status_code, 404)
+        self.assertEqual(self.client.post("/notes/999/delete").status_code, 404)
+        self.assertEqual(self.client.post("/notes/999/archive").status_code, 404)
+        self.assertEqual(self.client.post("/notes/999/unarchive").status_code, 404)
+
+    # -- archiving -----------------------------------------------------------
+    def test_archive_moves_the_note_into_the_archive_dropdown(self):
+        self.client.post("/notes", data={"title": "Old plan", "body": "keep me"},
+                         follow_redirects=True)
+        note_id = self._note_id("Old plan")
+
+        response = self.client.post("/notes/%d/archive" % note_id, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Archived note Old plan.", response.data)
+
+        body = self.client.get("/notes").get_data(as_text=True)
+        # The archive section is a collapsed dropdown that announces its count.
+        self.assertIn("Archived notes", body)
+        self.assertIn("1 note", body)
+        archived_section = body[body.index("Archived notes"):]
+        self.assertIn("Old plan", archived_section)     # it lives down there now
+        self.assertIn("archived", archived_section)     # the badge says so in words
+        # ...and it is gone from the live list above the dropdown.
+        live_section = body[:body.index("Archived notes")]
+        self.assertNotIn("Old plan", live_section)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+            self.assertEqual([n["title"] for n in db.list_notes(archived=True)],
+                             ["Old plan"])
+
+    def test_restore_moves_the_note_back(self):
+        self.client.post("/notes", data={"title": "Bounce", "body": "x"}, follow_redirects=True)
+        note_id = self._note_id("Bounce")
+        self.client.post("/notes/%d/archive" % note_id, follow_redirects=True)
+
+        response = self.client.post("/notes/%d/unarchive" % note_id, follow_redirects=True)
+        self.assertIn(b"Restored note Bounce from the archive.", response.data)
+        body = self.client.get("/notes").get_data(as_text=True)
+        self.assertIn("Nothing archived yet.", body)    # dropdown is empty again
+        with self.app.app_context():
+            self.assertEqual([n["title"] for n in db.list_notes()], ["Bounce"])
+            self.assertEqual(db.list_notes(archived=True), [])
+
+    def test_archived_note_can_still_be_deleted(self):
+        self.client.post("/notes", data={"title": "Bin me", "body": "x"}, follow_redirects=True)
+        note_id = self._note_id("Bin me")
+        self.client.post("/notes/%d/archive" % note_id, follow_redirects=True)
+
+        confirm = self.client.get("/notes/%d/delete" % note_id)
+        self.assertEqual(confirm.status_code, 200)
+        self.assertIn(b"Delete note Bin me?", confirm.data)
+        self.client.post("/notes/%d/delete" % note_id, follow_redirects=True)
+        with self.app.app_context():
+            self.assertEqual(db.list_notes(), [])
+            self.assertEqual(db.list_notes(archived=True), [])
+
+    def test_archiving_twice_is_a_harmless_no_op(self):
+        self.client.post("/notes", data={"title": "Steady", "body": "x"}, follow_redirects=True)
+        note_id = self._note_id("Steady")
+        self.client.post("/notes/%d/archive" % note_id, follow_redirects=True)
+        response = self.client.post("/notes/%d/archive" % note_id, follow_redirects=True)
+        self.assertEqual(response.status_code, 200)     # still fine, still archived
+        with self.app.app_context():
+            self.assertEqual(len(db.list_notes(archived=True)), 1)
+
+    def test_note_categories_panel_is_a_collapsed_dropdown(self):
+        body = self.client.get("/notes").get_data(as_text=True)
+        start = body.index("Note categories")
+        tag_start = body.rfind("<details", 0, start)
+        self.assertNotIn(" open", body[tag_start:start])   # collapsed by default
+
+    def test_export_marks_archived_notes(self):
+        self.client.post("/notes", data={"title": "Live", "body": "a", "category_id": ""},
+                         follow_redirects=True)
+        self.client.post("/notes", data={"title": "Put away", "body": "b", "category_id": ""},
+                         follow_redirects=True)
+        self.client.post("/notes/%d/archive" % self._note_id("Put away"), follow_redirects=True)
+        document = json.loads(export.to_json())
+        by_title = {note["title"]: note for note in document["notes"]}
+        self.assertEqual(by_title["Live"]["archived"], 0)
+        self.assertEqual(by_title["Put away"]["archived"], 1)
+        # live notes sort ahead of archived ones in the export
+        self.assertEqual(document["notes"][0]["title"], "Live")
+
+    def test_note_list_includes_category_colour_dot(self):
+        self.client.post("/notes", data={"title": "Ideas note", "body": "x",
+                                         "category_id": self.note_category_id("Ideas")},
+                         follow_redirects=True)
+        body = self.client.get("/notes").get_data(as_text=True)
+        self.assertIn('--cat: #7c3aed', body)   # Ideas' hex colour (note category)
+        self.assertIn("Ideas", body)
+
+    def test_notes_tab_in_no_js_pages(self):
+        pages = [self.client.get("/notes")]
+        for response in pages:
+            self.assertEqual(response.status_code, 200)
+            body = response.get_data(as_text=True).lower()
+            self.assertNotIn("<script", body)
+            self.assertNotIn("javascript:", body)
+            self.assertNotIn("onclick", body)
+            self.assertNotIn("onchange", body)
+
+    def test_export_json_contains_notes(self):
+        self.client.post("/notes", data={"title": "Keep", "body": "Go", "category_id": ""},
+                         follow_redirects=True)
+        self.client.post("/notes", data={"title": "Discard", "body": "No", "category_id": ""},
+                         follow_redirects=True)
+        document = json.loads(export.to_json())
+        self.assertEqual(len(document["notes"]), 2)
+        self.assertEqual(document["notes"][0]["title"], "Discard")   # newest first
+        self.assertEqual(document["notes"][0]["body"], "No")
+        self.assertIn("categories", document)
+        # Notes carry their own categories into the export as well.
+        self.assertIn("note_categories", document)
+        self.assertEqual([c["name"] for c in document["note_categories"]],
+                         ["Ideas", "Journal", "Reference"])
+        self.assertEqual(len(document["days"]), 0)
+
+    # -- note categories -----------------------------------------------------
+    def test_default_note_categories_are_seeded(self):
+        with self.app.app_context():
+            names = [c["name"] for c in db.list_note_categories()]
+        self.assertEqual(names, ["Ideas", "Journal", "Reference"])
+
+    def test_note_category_can_be_created_and_deleted(self):
+        response = self.client.post("/notes/categories",
+                                    data={"name": "Recipes", "color": "#ab12cd"},
+                                    follow_redirects=True)
+        self.assertIn(b"Added category Recipes.", response.data)
+        category_id = self.note_category_id("Recipes")
+        self.assertIsNotNone(category_id)
+
+        # Attach a note, then walk the confirm -> delete flow.
+        self.client.post("/notes", data={"title": "", "body": "Pasta night",
+                                         "category_id": category_id},
+                         follow_redirects=True)
+        confirm = self.client.get("/notes/categories/%d/delete" % category_id)
+        self.assertEqual(confirm.status_code, 200)
+        self.assertIn(b"Delete category Recipes?", confirm.data)
+        self.assertIn(b"1 note(s) currently use this category", confirm.data)
+
+        response = self.client.post("/notes/categories/%d/delete" % category_id,
+                                    follow_redirects=True)
+        self.assertIn(
+            b"Deleted category Recipes. Its 1 note(s) are now uncategorised.",
+            response.data,
+        )
+        self.assertIsNone(self.note_category_id("Recipes"))
+        with self.app.app_context():
+            note = db.list_notes()[0]
+            self.assertIsNone(note["category_id"])     # the note itself survives
+            self.assertEqual(note["body"], "Pasta night")
+
+    def test_note_category_create_rejects_bad_input(self):
+        blank = self.client.post("/notes/categories", data={"name": "   "},
+                                 follow_redirects=True)
+        self.assertIn(b"A category needs a name.", blank.data)
+        duplicate = self.client.post("/notes/categories", data={"name": "ideas"},
+                                     follow_redirects=True)
+        self.assertIn(b"ideas already exists.", duplicate.data)   # case-insensitive
+        bad_color = self.client.post("/notes/categories",
+                                     data={"name": "X", "color": "red"},
+                                     follow_redirects=True)
+        self.assertIn(b"Colour must be a hex value", bad_color.data)
+        with self.app.app_context():
+            self.assertEqual([c["name"] for c in db.list_note_categories()],
+                             ["Ideas", "Journal", "Reference"])
+
+    def test_unknown_note_category_returns_404(self):
+        self.assertEqual(self.client.get("/notes/categories/999/delete").status_code, 404)
+        self.assertEqual(self.client.post("/notes/categories/999/delete").status_code, 404)
+
+    def test_legacy_notes_are_migrated_to_their_own_categories(self):
+        # Build a database in the *old* shape: notes.category_id points at the
+        # task categories table. init_db must rebuild it so the note keeps its
+        # category by name, without touching the task categories.
+        legacy = os.path.join(_TMP_ROOT, "legacy-%s.db" % self._testMethodName)
+        for suffix in ("", "-wal", "-shm"):
+            if os.path.exists(legacy + suffix):
+                os.remove(legacy + suffix)
+        conn = sqlite3.connect(legacy)
+        conn.executescript(
+            """
+            CREATE TABLE categories (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                name       TEXT NOT NULL UNIQUE,
+                color      TEXT NOT NULL DEFAULT '#6b7280',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE notes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                title       TEXT NOT NULL CHECK (length(trim(title)) BETWEEN 1 AND 200),
+                body        TEXT NOT NULL DEFAULT '' CHECK (length(body) <= 5000),
+                category_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO categories (name, color) VALUES ('Personal', '#7c3aed');
+            INSERT INTO notes (title, body, category_id) VALUES ('Old note', 'kept', 1);
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        db.init_db(legacy)      # the migration runs here
+
+        conn = sqlite3.connect(legacy)
+        conn.row_factory = sqlite3.Row
+        sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notes'"
+        ).fetchone()[0]
+        self.assertIn("REFERENCES note_categories", sql)
+        note = conn.execute("SELECT * FROM notes").fetchone()
+        self.assertEqual(note["title"], "Old note")
+        self.assertEqual(note["body"], "kept")
+        kept = conn.execute(
+            "SELECT name FROM note_categories WHERE id = ?", (note["category_id"],)
+        ).fetchone()
+        self.assertEqual(kept["name"], "Personal")     # carried over by name
+        self.assertEqual(                             # task categories untouched
+            conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0], 1
+        )
+        conn.close()
 
     def test_day_rows_are_cleaned_up_with_their_tasks(self):
         # The web UI no longer exposes days, but the data layer guarantees that

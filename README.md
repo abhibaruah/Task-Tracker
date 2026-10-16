@@ -17,6 +17,7 @@ everything you have added.
 | 3 | To Do / In Progress / Done with colours | Three small buttons in the Status column move a task between states, so you can mark things complete straight from the table. Rows are coloured by status **and** labelled in words, so colour is never the only signal. |
 | 4 | Banner of open work | A sticky dark banner at the top shows the status counts (To Do / In Progress / Done) and nothing else — individual tasks are never listed there, only in the table below. |
 | 5 | Client-server via the browser | One Flask process serves the page and handles the form posts; you use it in any browser at `http://127.0.0.1:5000`. |
+| 6 | Notes tab | A separate tab (`Tasks | Notes`) for quick notes: the **body is required** and gets a big writing box; the title is an optional heading. Notes have their **own categories** — independent of the task categories — managed through a collapsed "Note categories" dropdown on the same page. The list is newest first; each note can be **archived** into its own dropdown (restore or delete from there) or deleted via a confirmation page. |
 
 ## The table
 
@@ -24,6 +25,7 @@ everything you have added.
 |---|---|---|
 | **Tick box** | no | The leftmost column: tick the rows you want gone, then press `Delete selected` above the table. |
 | **Task** | yes | Click the title to expand the row: notes, edit form and delete. |
+| **Notes** | yes | Open the **Notes** tab (`Tasks | Notes`): a big body box (required, below the optional title) and a category dropdown fed by the Notes tab's *own* categories — add or remove them via the collapsed "Note categories" dropdown. The list is newest first; each note row offers `archive` (moves it into the "Archived notes" dropdown, where you can `restore` or `delete` it) and `delete` (opens a confirmation page first).
 | **Status** | yes | `To Do` / `In Progress` / `Done` buttons; the current one is pressed in. Sorting puts To Do first, Done last. |
 | **Category** | yes | Colour dot and name, or `—` when uncategorised. |
 | **Date added** | yes | The date the task belongs to. Defaults to today. |
@@ -123,15 +125,25 @@ four categories (Work, Personal, Errands, Admin).
 
 ## Data model
 
-Three tables in one SQLite file (`tasks.db`):
+Five tables in one SQLite file (`tasks.db`):
 
 ```
-categories (id, name UNIQUE, color, created_at)
-days       (id, day_date UNIQUE, label, created_at)
-items      (id, day_id -> days ON DELETE CASCADE, title, notes, priority,
-            category_id -> categories ON DELETE SET NULL, status,
-            created_at, updated_at)
+categories      (id, name UNIQUE, color, created_at)
+note_categories (id, name UNIQUE, color, created_at)
+days            (id, day_date UNIQUE, label, created_at)
+items           (id, day_id -> days ON DELETE CASCADE, title, notes, priority,
+                 category_id -> categories ON DELETE SET NULL, status,
+                 created_at, updated_at)
+notes           (id, title (optional), body (required),
+                 category_id -> note_categories ON DELETE SET NULL,
+                 archived (0 or 1), created_at, updated_at)
 ```
+
+`categories` belongs to the Tasks tab and `note_categories` to the Notes tab;
+they are separate tables on purpose, so a tag on the Notes tab never has to
+mean anything on the task table (and vice versa). Databases written before
+note categories existed are migrated automatically on startup: each note
+keeps its category by name.
 
 `days` still exists as the "Date added" value for a task — it is just no longer
 shown as its own section. You never have to create one by hand: adding a task
@@ -143,6 +155,7 @@ Enforced by the schema itself, so bad data cannot be stored even by mistake:
 - `status` may only be `todo`, `in_progress` or `done`
 - `day_date` must look like `YYYY-MM-DD`, and `color` like `#rrggbb`
 - titles must be 1–200 characters; notes up to 2000
+- a note's body is required (up to 5000 characters); its title may be blank
 
 Dates are stored as ISO text, which sorts chronologically with a plain string
 comparison — which is why sorting the Date column is a database `ORDER BY` and
